@@ -2,6 +2,7 @@ defmodule Sms.SmsDispatcher do
   require Logger
 
   # Sms.SmsDispatcher.dispatch(%{mobile: "260978921730", id: 1, message: "testing Zamtel", sender: "Probase"})
+
   def dispatch(sms_log) do
     # Log the dispatch request
     Logger.info("Dispatching SMS to #{sms_log.mobile}")

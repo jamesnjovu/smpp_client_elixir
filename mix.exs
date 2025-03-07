@@ -46,6 +46,9 @@ defmodule App.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       {:smppex, "~> 2.3.2"},
+      {:sms_part_counter, "~> 0.1.6"},
+      {:html_entities, "~> 0.5.2"},
+      {:esmpp, "~> 0.0.13"},
     ]
   end
 

@@ -149,7 +149,12 @@ defmodule Sms.SmppServer do
         bind_pdu = PduFactory.bind_transceiver(config.system_id, config.password)
 
         # Send bind request
-        case Sync.request(esme, bind_pdu, @timeout) |> IO.inspect(label: "Binding response") do
+        case Sync.request(esme, bind_pdu, @timeout) do
+          :stop ->
+            Logger.error("SMPP bind request received stop signal")
+            Sync.stop(esme)
+            {:error, :binding_stopped}
+
           {:ok, resp_pdu} ->
             case Pdu.command_status(resp_pdu) do
               0 -> # ESME_ROK - success
@@ -167,11 +172,6 @@ defmodule Sms.SmppServer do
             end
 
           {:error, reason} ->
-            Logger.error("SMPP bind request failed: #{inspect(reason)}")
-            Sync.stop(esme)
-            {:error, {:bind_request_failed, reason}}
-
-          reason ->
             Logger.error("SMPP bind request failed: #{inspect(reason)}")
             Sync.stop(esme)
             {:error, {:bind_request_failed, reason}}
