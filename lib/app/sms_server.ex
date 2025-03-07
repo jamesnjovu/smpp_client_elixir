@@ -175,6 +175,10 @@ defmodule Sms.SmppServer do
       {:error, reason} ->
         Logger.error("SMPP connection failed: #{inspect(reason)}")
         {:error, {:connection_failed, reason}}
+
+      reason ->
+        Logger.error("SMPP connection failed: #{inspect(reason)}")
+        {:error, {:connection_failed, reason}}
     end
   end
 
