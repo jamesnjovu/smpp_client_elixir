@@ -23,6 +23,7 @@ defmodule Sms.SmsDispatcher do
     end
   end
 
+  # Sms.SmsDispatcher.test
   def test() do
     [
       "AtlasMara", "Cavmont", "FCB", "ZICB", "ZRA", "NRFA", "ProBASE", "eToll", "EvelynHone", "FNB",

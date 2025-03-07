@@ -122,7 +122,7 @@ defmodule Sms.SmppServer do
       :deliver_sm ->
         # This could be a delivery receipt
         Logger.info("Received delivery receipt: #{inspect(pdu)}")
-        # Process delivery receipt here
+        process_delivery_receipt(pdu)
 
       :enquire_link ->
         # Automatically handled by the library
@@ -131,6 +131,108 @@ defmodule Sms.SmppServer do
       cmd_name ->
         Logger.debug("Received SMPP PDU: #{inspect(cmd_name)}")
     end
+  end
+
+  # Process delivery receipt and update message status
+  defp process_delivery_receipt(pdu) do
+    with message_id <- extract_message_id(pdu),
+         {:ok, receipt_data} <- extract_receipt_data(pdu),
+         {:ok, status} <- determine_delivery_status(receipt_data) do
+
+      Logger.info("Processing delivery receipt for message_id: #{message_id}, status: #{status}")
+
+      case find_sms_log_by_message_id(message_id) do
+        {:ok, sms_log} ->
+          if status == :delivered do
+            update_sms_status(sms_log, :delivered)
+          else
+            update_sms_status(sms_log, {:status_update, status})
+          end
+
+        {:error, reason} ->
+          Logger.warning("Could not find SMS log for message_id: #{message_id}, reason: #{inspect(reason)}")
+      end
+    else
+      {:error, reason} ->
+        Logger.error("Failed to process delivery receipt: #{inspect(reason)}")
+      _ ->
+        Logger.error("Invalid delivery receipt format")
+    end
+  end
+
+  # Extract the message_id from a delivery receipt PDU
+  defp extract_message_id(pdu) do
+    case Pdu.field(pdu, :receipted_message_id) do
+      nil ->
+        # If not in receipted_message_id field, try to extract from short_message
+        case extract_message_id_from_content(pdu) do
+          {:ok, id} -> id
+          _ -> nil
+        end
+      id -> parse_message_id(id)
+    end
+  end
+
+  # Extract message_id from short_message content (some providers put it there)
+  defp extract_message_id_from_content(pdu) do
+    case Pdu.field(pdu, :short_message) do
+      nil -> {:error, :no_short_message}
+      content ->
+        case Regex.run(~r/id:([a-zA-Z0-9]+)/, content) do
+          [_, id] -> {:ok, id}
+          _ -> {:error, :no_id_in_content}
+        end
+    end
+  end
+
+  # Extract delivery receipt data from PDU
+  defp extract_receipt_data(pdu) do
+    case Pdu.field(pdu, :short_message) do
+      nil -> {:error, :no_short_message}
+      content -> parse_receipt_content(content)
+    end
+  end
+
+  # Parse the receipt content to extract delivery data
+  defp parse_receipt_content(content) do
+    # Different providers format delivery receipts differently
+    # This is a simple implementation that would need to be adjusted based on your provider's format
+    receipt_map = Regex.scan(~r/(\w+):([^\s]+)/, content)
+    |> Enum.map(fn [_, key, value] -> {String.downcase(key), value} end)
+    |> Map.new()
+
+    if Map.has_key?(receipt_map, "stat") do
+      {:ok, receipt_map}
+    else
+      {:error, :invalid_receipt_format}
+    end
+  end
+
+  # Determine the delivery status from the receipt data
+  defp determine_delivery_status(receipt_data) do
+    case Map.get(receipt_data, "stat") do
+      "DELIVRD" -> {:ok, :delivered}
+      "DELIVERED" -> {:ok, :delivered}
+      "EXPIRED" -> {:ok, :expired}
+      "DELETED" -> {:ok, :deleted}
+      "UNDELIV" -> {:ok, :undeliverable}
+      "ACCEPTD" -> {:ok, :accepted}
+      "UNKNOWN" -> {:ok, :unknown}
+      "REJECTD" -> {:ok, :rejected}
+      status when is_binary(status) -> {:ok, String.to_atom(String.downcase(status))}
+      nil -> {:error, :no_status}
+      _ -> {:error, :unknown_status}
+    end
+  end
+
+  # Find SMS log by message_id
+  defp find_sms_log_by_message_id(message_id) do
+    # This would typically query your database
+    # For now, we'll return a mock error since implementation depends on your storage system
+    Logger.info("Would look up SMS log for message_id: #{message_id}")
+    # Uncomment and implement when ready:
+    # SmsLogs.find_by_message_id(message_id)
+    {:error, :not_implemented}
   end
 
   defp connect_and_bind(config) do
