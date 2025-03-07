@@ -170,6 +170,11 @@ defmodule Sms.SmppServer do
             Logger.error("SMPP bind request failed: #{inspect(reason)}")
             Sync.stop(esme)
             {:error, {:bind_request_failed, reason}}
+
+          reason ->
+            Logger.error("SMPP bind request failed: #{inspect(reason)}")
+            Sync.stop(esme)
+            {:error, {:bind_request_failed, reason}}
         end
 
       {:error, reason} ->
