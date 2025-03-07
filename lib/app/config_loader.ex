@@ -108,7 +108,7 @@ defmodule Sms.SmppConfigLoader do
       %{
         id: 2,
         host: "172.17.1.42",
-        mobile_regex: "^(26075|26095)",
+        mobile_regex: "^(26075|26095|26097)",
         password: "prob@123",
         port: 2775,
         service_name: "ZAMTEL",
