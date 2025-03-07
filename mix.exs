@@ -49,6 +49,7 @@ defmodule App.MixProject do
       {:sms_part_counter, "~> 0.1.6"},
       {:html_entities, "~> 0.5.2"},
       {:esmpp, "~> 0.0.13"},
+      {:gsm, "~> 0.1.1"},
     ]
   end
 
