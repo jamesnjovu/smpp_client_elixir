@@ -20,7 +20,7 @@ defmodule Sms.SmppConfigLoader do
     {:ok, %{configs: []}}
   end
 
-  def handle_info(:refresh_configs, state) do
+  def handle_info(:refresh_configs, _state) do
     configs = load_smpp_config()
 
     # Convert regex strings to actual regex patterns

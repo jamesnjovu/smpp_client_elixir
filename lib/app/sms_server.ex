@@ -100,7 +100,7 @@ defmodule Sms.SmppServer do
   end
 
   def handle_info({:smppex_esme, _, :closed}, state) do
-    Logger.warn("SMPP connection closed: #{state.config.id}")
+    Logger.warning("SMPP connection closed: #{state.config.id}")
     Process.send_after(self(), :try_reconnect, 5_000)
     {:noreply, %{state | mc: nil, connection_error: true}}
   end
