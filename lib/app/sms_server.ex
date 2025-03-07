@@ -25,7 +25,13 @@ defmodule Sms.SmppServer do
       {:ok, mc} ->
         Logger.info("Successfully connected and bound to SMPP server: #{state.config.id}")
         {:noreply, %{state | mc: mc, connection_error: false}}
+
       {:error, reason} ->
+        Logger.error("Failed to connect to SMPP server #{state.config.id}: #{inspect(reason)}")
+        Process.send_after(self(), :try_reconnect, 30_000)
+        {:noreply, %{state | mc: nil, connection_error: true}}
+
+      reason ->
         Logger.error("Failed to connect to SMPP server #{state.config.id}: #{inspect(reason)}")
         Process.send_after(self(), :try_reconnect, 30_000)
         {:noreply, %{state | mc: nil, connection_error: true}}
