@@ -108,7 +108,7 @@ defmodule Sms.SmppConfigLoader do
       %{
         id: 2,
         host: "165.56.64.21",
-        mobile_regex: "^(26075|26095|26097)",
+        mobile_regex: "^(26075|26095|26097|26096)",
         # password: "prob@123",
         password: "gs_G^yH5",
         port: 7505,
