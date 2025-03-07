@@ -199,6 +199,7 @@ defmodule Sms.SmppServer do
     max_multipart = config.max_multipart_length || 153
 
     with(
+      true <- recipient.count > 1,
       {:ok, "gsm_7bit"} <- SmsPartCounter.detect_encoding(message),
       ref = :rand.uniform(255),
       gsm_message = GSM.to_gsm(message),

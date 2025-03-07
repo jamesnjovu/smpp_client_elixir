@@ -1,14 +1,14 @@
 defmodule Sms.SmsDispatcher do
   require Logger
 
-  # Sms.SmsDispatcher.dispatch(%{mobile: "260975870923", id: 1, message: "testing Zamtel", sender: "Probase"})
+  # Sms.SmsDispatcher.dispatch(%{mobile: "260975870923", count: 1, id: 1, message: "testing Zamtel", sender: "Probase"})
 
   def dispatch(sms_log) do
     # Log the dispatch request
     Logger.info("Dispatching SMS to #{sms_log.mobile}")
     case Sms.SmppConfigLoader.get_matching_config(sms_log.mobile) do
       nil ->
-        Logger.warn("No matching SMPP config for #{sms_log.mobile}")
+        Logger.warning("No matching SMPP config for #{sms_log.mobile}")
         {:error, :no_matching_config}
 
       config ->
