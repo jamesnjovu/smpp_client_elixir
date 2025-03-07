@@ -60,7 +60,7 @@ defmodule Sms.SmppServer do
   def handle_call({:send_sms, sms_log}, _from, state) do
     split_messages =
       HtmlEntities.decode(sms_log.message)
-      |> split_long_message(state.config)
+      |> split_long_message(state.config, sms_log.count)
 
     results = Enum.map(split_messages, fn part ->
       send_message(part, sms_log, state)
@@ -194,12 +194,12 @@ defmodule Sms.SmppServer do
     old_config.password != new_config.password
   end
 
-  defp split_long_message(message, config) do
-    max_single = config.max_single_length || 160
+  defp split_long_message(message, config, count) do
+    _max_single = config.max_single_length || 160
     max_multipart = config.max_multipart_length || 153
 
     with(
-      true <- recipient.count > 1,
+      true <- count > 1,
       {:ok, "gsm_7bit"} <- SmsPartCounter.detect_encoding(message),
       ref = :rand.uniform(255),
       gsm_message = GSM.to_gsm(message),
