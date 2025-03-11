@@ -41,11 +41,12 @@ defmodule Sms.SmppServer do
   def handle_cast({:update_config, new_config}, state) do
     if config_requires_reconnect?(state.config, new_config) do
       # Safely stop MC if it exists
-      if state.mc, do: SMPPEX.ESME.Sync.stop(state.mc)
+      if state.mc, do: Sync.stop(state.mc)
 
       # Schedule a reconnect with the new config
       Process.send_after(self(), :connect, 1000)
       {:noreply, %{state | config: new_config, mc: nil}}
+
     else
       {:noreply, %{state | config: new_config}}
     end
