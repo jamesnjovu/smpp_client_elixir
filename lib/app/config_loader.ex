@@ -107,9 +107,8 @@ defmodule Sms.SmppConfigLoader do
     [
       %{
         id: 2,
-        host: "messaging.airtel.co.zm",
+        host: "https://messaging.airtel.co.zm",
         mobile_regex: "^(26075|26095|26097|26096)",
-        # password: "prob@123",
         password: "pr0b4s3",
         port: 9001,
         service_name: "AIRTEL",
