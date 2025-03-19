@@ -105,20 +105,20 @@ defmodule Sms.SmppConfigLoader do
 
   defp load_smpp_config do
     [
+      # %{
+      #   id: 2,
+      #   host: "messaging.airtel.co.zm",
+      #   mobile_regex: "^(26075|26095|26097|26096)",
+      #   password: "pr0b4s3",
+      #   port: 9001,
+      #   service_name: "AIRTEL",
+      #   system_id: "probase",
+      #   status: "D",
+      #   inserted_at: ~N[2025-03-07 12:10:13],
+      #   updated_at: ~N[2025-03-07 12:10:13]
+      # },
       %{
         id: 2,
-        host: "messaging.airtel.co.zm",
-        mobile_regex: "^(26075|26095|26097|26096)",
-        password: "pr0b4s3",
-        port: 9001,
-        service_name: "AIRTEL",
-        system_id: "probase",
-        status: "D",
-        inserted_at: ~N[2025-03-07 12:10:13],
-        updated_at: ~N[2025-03-07 12:10:13]
-      },
-      %{
-        id: 1,
         host: "172.18.15.14",
         mobile_regex: "^(26075|26095|26097|26096)",
         password: "Prob@se",
