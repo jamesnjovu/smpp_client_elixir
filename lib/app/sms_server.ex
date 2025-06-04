@@ -71,10 +71,9 @@ defmodule Sms.SmppServer do
 
       total_count = length(split_messages)
 
-      results =
-        Enum.map(split_messages, fn part ->
-          send_message(part, sms_log, state, total_count)
-        end)
+      results = Enum.map(split_messages, fn part ->
+        send_message(part, sms_log, state, total_count)
+      end)
 
       case Enum.all?(results, &match?({:ok, _}, &1)) do
         true ->
@@ -85,12 +84,11 @@ defmodule Sms.SmppServer do
           failed_parts = Enum.filter(results, &match?({:error, _}, &1))
           update_sms_status(sms_log, {:failed, failed_parts})
 
-          connection_issue =
-            Enum.any?(failed_parts, fn
-              {:error, {_, :connection_dead}} -> true
-              {:error, {_, :connection_died}} -> true
-              _ -> false
-            end)
+          connection_issue = Enum.any?(failed_parts, fn
+            {:error, {_, :connection_dead}} -> true
+            {:error, {_, :connection_died}} -> true
+            _ -> false
+          end)
 
           if connection_issue do
             Process.send(self(), :try_reconnect, [])
@@ -393,26 +391,45 @@ defmodule Sms.SmppServer do
       Logger.error("SMPP connection process is no longer alive")
       {:error, {part, :connection_dead}}
     else
-      pdu =
-        PduFactory.submit_sm(
-          {sms_log.sender, 5, 1},
-          {sms_log.mobile, 1, 1},
-          {0, part},
-          # Request delivery receipt
-          1
+      # Debug message length
+      part_length = String.length(part)
+
+      Logger.debug(
+        "Sending message part of length #{part_length}: #{String.slice(part, 0, 50)}..."
+      )
+
+      # Check if message is too long for single SMS
+      if part_length > 160 do
+        Logger.warning(
+          "Message part is #{part_length} characters, which may be too long for single SMS"
         )
-        |> (fn submit_sm ->
-              # Set ESM class for multipart messages
-              if total_count > 1 do
-                Pdu.set_mandatory_field(submit_sm, :esm_class, 64)
-              else
-                submit_sm
-              end
-            end).()
+      end
 
       try do
+        pdu =
+          PduFactory.submit_sm(
+            {sms_log.sender, 5, 1},
+            {sms_log.mobile, 1, 1},
+            {0, part},
+            # Request delivery receipt
+            1
+          )
+          |> (fn submit_sm ->
+                # Set ESM class for multipart messages
+                if total_count > 1 do
+                  Logger.debug("Setting ESM class for multipart message (#{total_count} parts)")
+                  Pdu.set_mandatory_field(submit_sm, :esm_class, 64)
+                else
+                  submit_sm
+                end
+              end).()
+
+        Logger.debug("PDU created successfully, sending request...")
+
         case Sync.request(state.mc, pdu, @timeout) do
           {:ok, resp_pdu} ->
+            Logger.debug("Received response PDU")
+
             case Pdu.command_status(resp_pdu) do
               # ESME_ROK - success
               0 ->
@@ -428,13 +445,31 @@ defmodule Sms.SmppServer do
                 {:error, {part, {:submit_failed, status}}}
             end
 
+          :timeout ->
+            Logger.error("Request timeout while sending message (#{@timeout}ms)")
+            {:error, {part, :request_timeout}}
+
+          :stop ->
+            Logger.error("SMPP connection stopped during message send")
+            {:error, {part, :connection_stopped}}
+
           {:error, reason} ->
             Logger.error("Failed to send message: #{inspect(reason)}")
             {:error, {part, reason}}
+
+          other ->
+            Logger.error("Unexpected response from Sync.request: #{inspect(other)}")
+            {:error, {part, {:unexpected_response, other}}}
         end
       rescue
+        e in CaseClauseError ->
+          Logger.error("CaseClauseError during send_message: #{inspect(e)}")
+          Logger.error("Error term: #{inspect(e.term)}")
+          {:error, {part, :case_clause_error}}
+
         e ->
           Logger.error("Exception during send_message: #{inspect(e)}")
+          Logger.error("Exception type: #{inspect(e.__struct__)}")
           {:error, {part, :send_exception}}
       catch
         :exit, reason ->
