@@ -1,11 +1,10 @@
 defmodule Sms.SmsDispatcher do
   require Logger
 
-  # Sms.SmsDispatcher.dispatch(%{mobile: "260978921730", count: 1, id: 1, message: "testing Zamtel", sender: "ZICB"})
-
   def dispatch(sms_log) do
     # Log the dispatch request
     Logger.info("Dispatching SMS to #{sms_log.mobile}")
+
     case Sms.SmppConfigLoader.get_matching_config(sms_log.mobile) do
       nil ->
         Logger.warning("No matching SMPP config for #{sms_log.mobile}")
@@ -25,8 +24,29 @@ defmodule Sms.SmsDispatcher do
 
   # Sms.SmsDispatcher.test
   def test() do
+    dispatch(%{
+      mobile: "260978921730",
+      count: 1,
+      id: 1,
+      message: "Short test message",
+      sender: "Probase"
+    })
+
+    Logger.info("Short message dispatched")
+    Logger.info("================================================")
+
+    dispatch(%{
+      mobile: "260978921730",
+      count: 1,
+      id: 1,
+      message:
+        "FINAL DEMAND FOR PAYMENT Dear Client: THIS IS OUR FINAL ATTEMPT AND NOTICE DEMANDING PAYMENT FOR YOUR ARREARS. WE ARE ATTEMPTING TO RESOLVE THIS OUT OF COURT, BUT IF WE CONTINUE NOT TO COME TO AN AGREEMENT TO PAY OFF THE ARREARS WITHIN 7 WORKING DAYS, WE INTEND TO TAKE LEGAL ACTION. CALL US NOW ON 0967300274 TO PAY OFF YOUR INDEBTEDNESS",
+      sender: "Probase"
+    })
+  end
+
+  def test1() do
     [
-      "Probase"
       # "AtlasMara", "Cavmont", "FCB", "ZICB", "ZRA", "NRFA", "ProBASE", "eToll", "EvelynHone", "FNB",
       # "Stanbic", "Sygenta", "Twangale", "Zanaco", "ALTUS", "Bayport", "FABANK", "IndoZambia",
       # "NATSAVE", "VOC", "ZESCO", "NWSC", "Mpelembe", "Shikola", "LCC", "RTSA", "LWSC", "MFZ",
@@ -54,7 +74,14 @@ defmodule Sms.SmsDispatcher do
       # "Sylva_Food", "SFS", "SylvaTech", "MELKAT", "Flame", "Zircon", "Tumingle", "DANGOTE"
     ]
     |> Enum.each(fn sender ->
-      dispatch(%{mobile: "260978921730", count: 1, id: 1, message: "FINAL DEMAND FOR PAYMENT Dear Client: THIS IS OUR FINAL ATTEMPT AND NOTICE DEMANDING PAYMENT FOR YOUR ARREARS. WE ARE ATTEMPTING TO RESOLVE THIS OUT OF COURT, BUT IF WE CONTINUE NOT TO COME TO AN AGREEMENT TO PAY OFF THE ARREARS WITHIN 7 WORKING DAYS, WE INTEND TO TAKE LEGAL ACTION. CALL US NOW ON 0967300274 TO PAY OFF YOUR INDEBTEDNESS", sender: sender})
+      dispatch(%{
+        mobile: "260978921730",
+        count: 1,
+        id: 1,
+        message:
+          "FINAL DEMAND FOR PAYMENT Dear Client: THIS IS OUR FINAL ATTEMPT AND NOTICE DEMANDING PAYMENT FOR YOUR ARREARS. WE ARE ATTEMPTING TO RESOLVE THIS OUT OF COURT, BUT IF WE CONTINUE NOT TO COME TO AN AGREEMENT TO PAY OFF THE ARREARS WITHIN 7 WORKING DAYS, WE INTEND TO TAKE LEGAL ACTION. CALL US NOW ON 0967300274 TO PAY OFF YOUR INDEBTEDNESS",
+        sender: sender
+      })
     end)
   end
 end

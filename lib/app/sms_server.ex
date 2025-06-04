@@ -60,10 +60,8 @@ defmodule Sms.SmppServer do
 
   def handle_call({:send_sms, sms_log}, _from, state) do
     if !state.mc || !Process.alive?(state.mc) do
-      # Connection is not established or process died
       Logger.warning("Cannot send SMS - connection is not established or process died")
       update_sms_status(sms_log, {:failed, :not_connected})
-      # Trigger reconnection attempt
       Process.send(self(), :try_reconnect, [])
       {:reply, {:error, :not_connected}, %{state | mc: nil, connection_error: true}}
     else
@@ -71,9 +69,12 @@ defmodule Sms.SmppServer do
         HtmlEntities.decode(sms_log.message)
         |> split_long_message(state.config, sms_log.count)
 
-      results = Enum.map(split_messages, fn part ->
-        send_message(part, sms_log, state)
-      end)
+      total_count = length(split_messages)
+
+      results =
+        Enum.map(split_messages, fn part ->
+          send_message(part, sms_log, state, total_count)
+        end)
 
       case Enum.all?(results, &match?({:ok, _}, &1)) do
         true ->
@@ -84,14 +85,13 @@ defmodule Sms.SmppServer do
           failed_parts = Enum.filter(results, &match?({:error, _}, &1))
           update_sms_status(sms_log, {:failed, failed_parts})
 
-          # Check if any failures were due to connection issues
-          connection_issue = Enum.any?(failed_parts, fn
-            {:error, {_, :connection_dead}} -> true
-            {:error, {_, :connection_died}} -> true
-            _ -> false
-          end)
+          connection_issue =
+            Enum.any?(failed_parts, fn
+              {:error, {_, :connection_dead}} -> true
+              {:error, {_, :connection_died}} -> true
+              _ -> false
+            end)
 
-          # If we detected connection issues, trigger reconnect
           if connection_issue do
             Process.send(self(), :try_reconnect, [])
             {:reply, {:error, :sending_failed}, %{state | mc: nil, connection_error: true}}
@@ -333,25 +333,61 @@ defmodule Sms.SmppServer do
   end
 
   defp split_long_message(message, config, count) do
-    _max_single = config.max_single_length || 160
+    max_single = config.max_single_length || 160
     max_multipart = config.max_multipart_length || 153
 
-    with(
-      true <- count > 1,
-      {:ok, "gsm_7bit"} <- SmsPartCounter.detect_encoding(message),
-      ref = :rand.uniform(255),
-      gsm_message = GSM.to_gsm(message),
-      {:ok, :split, msgs} <-
-        SMPPEX.Pdu.Multipart.split_message(ref, gsm_message, 0, max_multipart)
-    ) do
-      msgs
-    else
-      _ ->
-        List.wrap(message)
+    message_length = String.length(message)
+
+    cond do
+      # If message fits in single SMS
+      message_length <= max_single ->
+        [message]
+
+      # If message needs to be split into multiple parts
+      count > 1 ->
+        # Try to use the multipart splitting if available
+        case split_with_multipart(message, max_multipart) do
+          {:ok, parts} -> parts
+          {:error, _} -> split_manually(message, max_multipart)
+        end
+
+      # Default case - split manually
+      true ->
+        split_manually(message, max_multipart)
     end
   end
 
-  defp send_message(part, sms_log, state, count \\ 1) do
+  defp split_with_multipart(message, max_length) do
+    try do
+      ref = :rand.uniform(255)
+
+      # Check if we can detect GSM encoding
+      case SmsPartCounter.detect_encoding(message) do
+        {:ok, "gsm_7bit"} ->
+          gsm_message = GSM.to_gsm(message)
+
+          case SMPPEX.Pdu.Multipart.split_message(ref, gsm_message, 0, max_length) do
+            {:ok, :split, msgs} -> {:ok, msgs}
+            _ -> {:error, :split_failed}
+          end
+
+        _ ->
+          {:error, :encoding_not_supported}
+      end
+    rescue
+      _ -> {:error, :multipart_not_available}
+    end
+  end
+
+  # Manual message splitting as fallback
+  defp split_manually(message, max_length) do
+    message
+    |> String.graphemes()
+    |> Enum.chunk_every(max_length)
+    |> Enum.map(&Enum.join/1)
+  end
+
+  defp send_message(part, sms_log, state, total_count \\ 1) do
     # First check if the process is still alive
     if !Process.alive?(state.mc) do
       Logger.error("SMPP connection process is no longer alive")
@@ -366,10 +402,12 @@ defmodule Sms.SmppServer do
           1
         )
         |> (fn submit_sm ->
-              if(count > 1,
-                do: Pdu.set_mandatory_field(submit_sm, :esm_class, 64),
-                else: submit_sm
-              )
+              # Set ESM class for multipart messages
+              if total_count > 1 do
+                Pdu.set_mandatory_field(submit_sm, :esm_class, 64)
+              else
+                submit_sm
+              end
             end).()
 
       try do
@@ -401,7 +439,6 @@ defmodule Sms.SmppServer do
       catch
         :exit, reason ->
           Logger.error("Exit during send_message: #{inspect(reason)}")
-          # Mark connection as dead so we'll reconnect
           Process.send(self(), :try_reconnect, [])
           {:error, {part, :connection_died}}
       end
