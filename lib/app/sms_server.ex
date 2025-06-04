@@ -5,7 +5,8 @@ defmodule Sms.SmppServer do
   alias SMPPEX.Pdu.Factory, as: PduFactory
   alias SMPPEX.ESME.Sync
 
-  @timeout 30_000 # 30 seconds connection timeout
+  # 30 seconds connection timeout
+  @timeout 30_000
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config, name: via_tuple(config.id))
@@ -46,7 +47,6 @@ defmodule Sms.SmppServer do
       # Schedule a reconnect with the new config
       Process.send_after(self(), :connect, 1000)
       {:noreply, %{state | config: new_config, mc: nil}}
-
     else
       {:noreply, %{state | config: new_config}}
     end
@@ -59,32 +59,58 @@ defmodule Sms.SmppServer do
   end
 
   def handle_call({:send_sms, sms_log}, _from, state) do
-    split_messages =
-      HtmlEntities.decode(sms_log.message)
-      |> split_long_message(state.config, sms_log.count)
+    if !state.mc || !Process.alive?(state.mc) do
+      # Connection is not established or process died
+      Logger.warning("Cannot send SMS - connection is not established or process died")
+      update_sms_status(sms_log, {:failed, :not_connected})
+      # Trigger reconnection attempt
+      Process.send(self(), :try_reconnect, [])
+      {:reply, {:error, :not_connected}, %{state | mc: nil, connection_error: true}}
+    else
+      split_messages =
+        HtmlEntities.decode(sms_log.message)
+        |> split_long_message(state.config, sms_log.count)
 
-    results = Enum.map(split_messages, fn part ->
-      send_message(part, sms_log, state)
-    end)
+      results = Enum.map(split_messages, fn part ->
+        send_message(part, sms_log, state)
+      end)
 
-    case Enum.all?(results, &match?({:ok, _}, &1)) do
-      true ->
-        update_sms_status(sms_log, :sent)
-        {:reply, :ok, state}
-      false ->
-        failed_parts = Enum.filter(results, &match?({:error, _}, &1))
-        update_sms_status(sms_log, {:failed, failed_parts})
-        {:reply, {:error, :sending_failed}, state}
+      case Enum.all?(results, &match?({:ok, _}, &1)) do
+        true ->
+          update_sms_status(sms_log, :sent)
+          {:reply, :ok, state}
+
+        false ->
+          failed_parts = Enum.filter(results, &match?({:error, _}, &1))
+          update_sms_status(sms_log, {:failed, failed_parts})
+
+          # Check if any failures were due to connection issues
+          connection_issue = Enum.any?(failed_parts, fn
+            {:error, {_, :connection_dead}} -> true
+            {:error, {_, :connection_died}} -> true
+            _ -> false
+          end)
+
+          # If we detected connection issues, trigger reconnect
+          if connection_issue do
+            Process.send(self(), :try_reconnect, [])
+            {:reply, {:error, :sending_failed}, %{state | mc: nil, connection_error: true}}
+          else
+            {:reply, {:error, :sending_failed}, state}
+          end
+      end
     end
   end
 
   # Add periodic reconnection attempt
   def handle_info(:try_reconnect, %{connection_error: true} = state) do
     Logger.info("Attempting to reconnect to SMPP server: #{state.config.id}")
+
     case connect_and_bind(state.config) do
       {:ok, mc} ->
         Logger.info("Successfully reconnected to SMPP server: #{state.config.id}")
         {:noreply, %{state | mc: mc, connection_error: false}}
+
       {:error, _reason} ->
         # Schedule another reconnection attempt
         Process.send_after(self(), :try_reconnect, 60_000)
@@ -139,7 +165,6 @@ defmodule Sms.SmppServer do
     with message_id <- extract_message_id(pdu),
          {:ok, receipt_data} <- extract_receipt_data(pdu),
          {:ok, status} <- determine_delivery_status(receipt_data) do
-
       Logger.info("Processing delivery receipt for message_id: #{message_id}, status: #{status}")
 
       case find_sms_log_by_message_id(message_id) do
@@ -151,11 +176,14 @@ defmodule Sms.SmppServer do
           end
 
         {:error, reason} ->
-          Logger.warning("Could not find SMS log for message_id: #{message_id}, reason: #{inspect(reason)}")
+          Logger.warning(
+            "Could not find SMS log for message_id: #{message_id}, reason: #{inspect(reason)}"
+          )
       end
     else
       {:error, reason} ->
         Logger.error("Failed to process delivery receipt: #{inspect(reason)}")
+
       _ ->
         Logger.error("Invalid delivery receipt format")
     end
@@ -170,14 +198,18 @@ defmodule Sms.SmppServer do
           {:ok, id} -> id
           _ -> nil
         end
-      id -> parse_message_id(id)
+
+      id ->
+        parse_message_id(id)
     end
   end
 
   # Extract message_id from short_message content (some providers put it there)
   defp extract_message_id_from_content(pdu) do
     case Pdu.field(pdu, :short_message) do
-      nil -> {:error, :no_short_message}
+      nil ->
+        {:error, :no_short_message}
+
       content ->
         case Regex.run(~r/id:([a-zA-Z0-9]+)/, content) do
           [_, id] -> {:ok, id}
@@ -198,9 +230,10 @@ defmodule Sms.SmppServer do
   defp parse_receipt_content(content) do
     # Different providers format delivery receipts differently
     # This is a simple implementation that would need to be adjusted based on your provider's format
-    receipt_map = Regex.scan(~r/(\w+):([^\s]+)/, content)
-    |> Enum.map(fn [_, key, value] -> {String.downcase(key), value} end)
-    |> Map.new()
+    receipt_map =
+      Regex.scan(~r/(\w+):([^\s]+)/, content)
+      |> Enum.map(fn [_, key, value] -> {String.downcase(key), value} end)
+      |> Map.new()
 
     if Map.has_key?(receipt_map, "stat") do
       {:ok, receipt_map}
@@ -241,7 +274,7 @@ defmodule Sms.SmppServer do
 
     # Connection options
     transport_opts = [
-      timeout: @timeout,
+      timeout: @timeout
     ]
 
     case Sync.start_link(config.host, config.port, transport_opts) do
@@ -260,11 +293,13 @@ defmodule Sms.SmppServer do
 
           {:ok, resp_pdu} ->
             case Pdu.command_status(resp_pdu) do
-              0 -> # ESME_ROK - success
+              # ESME_ROK - success
+              0 ->
                 Logger.info("SMPP bind successful for #{config.system_id}")
                 {:ok, esme}
 
-              5 -> # ESME_ROK - success
+              # ESME_ROK - success
+              5 ->
                 Logger.info("SMPP bind successful for #{config.system_id}")
                 {:ok, esme}
 
@@ -292,9 +327,9 @@ defmodule Sms.SmppServer do
 
   defp config_requires_reconnect?(old_config, new_config) do
     old_config.host != new_config.host ||
-    old_config.port != new_config.port ||
-    old_config.system_id != new_config.system_id ||
-    old_config.password != new_config.password
+      old_config.port != new_config.port ||
+      old_config.system_id != new_config.system_id ||
+      old_config.password != new_config.password
   end
 
   defp split_long_message(message, config, count) do
@@ -306,7 +341,8 @@ defmodule Sms.SmppServer do
       {:ok, "gsm_7bit"} <- SmsPartCounter.detect_encoding(message),
       ref = :rand.uniform(255),
       gsm_message = GSM.to_gsm(message),
-      {:ok, :split, msgs} <- SMPPEX.Pdu.Multipart.split_message(ref, gsm_message, 0, max_multipart)
+      {:ok, :split, msgs} <-
+        SMPPEX.Pdu.Multipart.split_message(ref, gsm_message, 0, max_multipart)
     ) do
       msgs
     else
@@ -316,35 +352,59 @@ defmodule Sms.SmppServer do
   end
 
   defp send_message(part, sms_log, state, count \\ 1) do
-    pdu = PduFactory.submit_sm(
-      {sms_log.sender, 5, 1},
-      {sms_log.mobile, 1, 1},
-      {0, part},
-      1 # Request delivery receipt
-    ) |> (fn submit_sm ->
-      if(count > 1,
-          do: Pdu.set_mandatory_field(submit_sm, :esm_class, 64),
-          else: submit_sm)
-    end).()
+    # First check if the process is still alive
+    if !Process.alive?(state.mc) do
+      Logger.error("SMPP connection process is no longer alive")
+      {:error, {part, :connection_dead}}
+    else
+      pdu =
+        PduFactory.submit_sm(
+          {sms_log.sender, 5, 1},
+          {sms_log.mobile, 1, 1},
+          {0, part},
+          # Request delivery receipt
+          1
+        )
+        |> (fn submit_sm ->
+              if(count > 1,
+                do: Pdu.set_mandatory_field(submit_sm, :esm_class, 64),
+                else: submit_sm
+              )
+            end).()
 
-    case Sync.request(state.mc, pdu, @timeout) do
-      {:ok, resp_pdu} ->
-        case Pdu.command_status(resp_pdu) do
-          0 -> # ESME_ROK - success
-            message_id =
-              Pdu.field(resp_pdu, :message_id)
-              |> parse_message_id()
-            Logger.info("Message sent successfully, message_id: #{message_id}")
-            {:ok, %{part: part, message_id: message_id}}
+      try do
+        case Sync.request(state.mc, pdu, @timeout) do
+          {:ok, resp_pdu} ->
+            case Pdu.command_status(resp_pdu) do
+              # ESME_ROK - success
+              0 ->
+                message_id =
+                  Pdu.field(resp_pdu, :message_id)
+                  |> parse_message_id()
 
-          status ->
-            Logger.error("Message sending failed with status: #{status}")
-            {:error, {part, {:submit_failed, status}}}
+                Logger.info("Message sent successfully, message_id: #{message_id}")
+                {:ok, %{part: part, message_id: message_id}}
+
+              status ->
+                Logger.error("Message sending failed with status: #{status}")
+                {:error, {part, {:submit_failed, status}}}
+            end
+
+          {:error, reason} ->
+            Logger.error("Failed to send message: #{inspect(reason)}")
+            {:error, {part, reason}}
         end
-
-      {:error, reason} ->
-        Logger.error("Failed to send message: #{inspect(reason)}")
-        {:error, {part, reason}}
+      rescue
+        e ->
+          Logger.error("Exception during send_message: #{inspect(e)}")
+          {:error, {part, :send_exception}}
+      catch
+        :exit, reason ->
+          Logger.error("Exit during send_message: #{inspect(reason)}")
+          # Mark connection as dead so we'll reconnect
+          Process.send(self(), :try_reconnect, [])
+          {:error, {part, :connection_died}}
+      end
     end
   end
 
