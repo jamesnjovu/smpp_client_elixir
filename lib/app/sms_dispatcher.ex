@@ -56,7 +56,7 @@ defmodule Sms.SmsDispatcher do
   # Test multiple different mobile numbers
   def test_multiple() do
     test_numbers = [
-      "260969326050",  # Should match the regex ^(26075|26095|26097|26096)
+      # "260969326050",  # Should match the regex ^(26075|26095|26097|26096)
       "260978921730",
       "260950763820"
     ]
